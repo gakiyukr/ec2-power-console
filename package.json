@@ -1,0 +1,11 @@
+{
+  "name": "ec2-workers-console",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.js"
+  }
+}

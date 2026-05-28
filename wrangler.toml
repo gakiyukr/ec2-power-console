@@ -1,0 +1,7 @@
+name = "ec2-workers-console"
+main = "src/index.js"
+compatibility_date = "2026-05-27"
+
+[vars]
+AWS_REGION = "us-west-2"
+EC2_INSTANCE_ID = "i-0d50f2b47b60208cb"
