@@ -1,4 +1,8 @@
 const SESSION_COOKIE = "ec2_session";
+const LOGIN_FAILURE_LIMIT = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_BLOCK_MS = 15 * 60 * 1000;
+const loginFailures = new Map();
 
 export const TARGETS = [
   { region: "us-west-2", instanceId: "i-0d50f2b47b60208cb", name: "SEA-1" },
@@ -197,6 +201,14 @@ export function buildPlaceholderRegions(targets = TARGETS) {
 }
 
 export function getTargetConfig(env) {
+  const [target] = TARGETS;
+  if (target) {
+    return {
+      region: target.region,
+      instanceId: target.instanceId,
+    };
+  }
+
   return {
     region: env.AWS_REGION || "us-west-2",
     instanceId: env.EC2_INSTANCE_ID || "i-0d50f2b47b60208cb",
@@ -268,17 +280,38 @@ async function signedAwsRequest(region, env, action, instanceIds) {
 }
 
 function extractAwsNameTag(xml) {
+  const nameTag = xml.match(
+    /<item>\s*<key>Name<\/key>\s*<value>([^<]*)<\/value>\s*<\/item>/,
+  );
+  if (nameTag) {
+    return nameTag[1];
+  }
+
   const names = findAllTagValues(xml, "value");
   return names[0] || "";
 }
 
 export function parseDescribeInstancesXml(xml) {
-  return {
-    instanceId: findTagValue(xml, "instanceId"),
-    state: findTagValue(xml, "name"),
-    publicDnsName: findTagValue(xml, "dnsName"),
-    awsNameTag: extractAwsNameTag(xml),
+  return parseDescribeInstancesXmlItems(xml)[0] || {
+    instanceId: "",
+    state: "",
+    publicDnsName: "",
+    awsNameTag: "",
   };
+}
+
+export function parseDescribeInstancesXmlItems(xml) {
+  const instanceMatches = [...xml.matchAll(/<instanceId>([^<]*)<\/instanceId>/g)];
+  return instanceMatches.map((match, index) => {
+    const nextMatch = instanceMatches[index + 1];
+    const segment = xml.slice(match.index, nextMatch?.index ?? xml.length);
+    return {
+      instanceId: match[1],
+      state: findTagValue(segment, "name"),
+      publicDnsName: findTagValue(segment, "dnsName"),
+      awsNameTag: extractAwsNameTag(segment),
+    };
+  });
 }
 
 export async function getStatus(env) {
@@ -299,7 +332,7 @@ export async function getStatus(env) {
   return parseDescribeInstancesXml(await response.text());
 }
 
-async function refreshTargets(env, targets = TARGETS) {
+export async function refreshTargets(env, targets = TARGETS) {
   if (env.__testHooks?.refreshTargets) {
     return env.__testHooks.refreshTargets(targets);
   }
@@ -332,8 +365,12 @@ async function refreshTargets(env, targets = TARGETS) {
     }
 
     const xml = await response.text();
-    const parsed = parseDescribeInstancesXml(xml);
-    const lookup = new Map([[parsed.instanceId, parsed]]);
+    const parsedItems = parseDescribeInstancesXmlItems(xml);
+    const lookup = new Map(
+      parsedItems
+        .filter((item) => item.instanceId)
+        .map((item) => [item.instanceId, item]),
+    );
 
     results.push({
       region: group.region,
@@ -363,6 +400,10 @@ export async function performAction(env, action) {
     return env.__testHooks.performAction(action);
   }
 
+  if (!["start", "stop"].includes(action)) {
+    throw new Error(`Unsupported action: ${action}`);
+  }
+
   const target = getTargetConfig(env);
   const actionName = action === "start" ? "StartInstances" : "StopInstances";
   const response = await signedAwsRequest(
@@ -373,14 +414,6 @@ export async function performAction(env, action) {
   );
   if (!response.ok) {
     throw new Error(`AWS action request failed with ${response.status}`);
-  }
-
-  if (action === "restart") {
-    return {
-      ok: true,
-      action,
-      phase: "stopping",
-    };
   }
 
   return {
@@ -522,7 +555,6 @@ function renderRegionSections(regions) {
                       <button type="button" class="secondary" data-action="refresh-one">刷新狀態</button>
                       <button type="button" data-action="start">開機</button>
                       <button type="button" class="warn" data-action="stop">關機</button>
-                      <button type="button" data-action="restart">重新啟動</button>
                     </div>
                   </article>
                 `,
@@ -794,13 +826,80 @@ async function isAuthenticated(request, env) {
   return verifySessionValue(sessionValue, env.SESSION_SECRET, env.APP_PASSWORD);
 }
 
+function getLoginFailureStore(env) {
+  return env.__testHooks?.loginFailures || loginFailures;
+}
+
+function getClientIp(request) {
+  return (
+    request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim() ||
+    "unknown"
+  );
+}
+
+function nowMs(env) {
+  return env.__testHooks?.now?.() || Date.now();
+}
+
+function getLoginFailureRecord(request, env) {
+  const store = getLoginFailureStore(env);
+  const key = getClientIp(request);
+  const now = nowMs(env);
+  const record = store.get(key);
+  if (!record) {
+    return { store, key, now, record: null };
+  }
+
+  if (record.blockedUntil && record.blockedUntil > now) {
+    return { store, key, now, record };
+  }
+
+  if (record.firstFailureAt + LOGIN_WINDOW_MS <= now) {
+    store.delete(key);
+    return { store, key, now, record: null };
+  }
+
+  return { store, key, now, record };
+}
+
+function isLoginBlocked(request, env) {
+  const { record, now } = getLoginFailureRecord(request, env);
+  return Boolean(record?.blockedUntil && record.blockedUntil > now);
+}
+
+function recordLoginFailure(request, env) {
+  const { store, key, now, record } = getLoginFailureRecord(request, env);
+  const nextRecord = record || {
+    count: 0,
+    firstFailureAt: now,
+    blockedUntil: 0,
+  };
+
+  nextRecord.count += 1;
+  if (nextRecord.count >= LOGIN_FAILURE_LIMIT) {
+    nextRecord.blockedUntil = now + LOGIN_BLOCK_MS;
+  }
+  store.set(key, nextRecord);
+}
+
+function clearLoginFailures(request, env) {
+  getLoginFailureStore(env).delete(getClientIp(request));
+}
+
 async function handleLogin(request, env) {
+  if (isLoginBlocked(request, env)) {
+    return htmlResponse(renderLoginPage("登入嘗試過多，請稍後再試。"), { status: 429 });
+  }
+
   const formData = await request.formData();
   const password = String(formData.get("password") || "");
   if (password !== env.APP_PASSWORD) {
+    recordLoginFailure(request, env);
     return htmlResponse(renderLoginPage("密碼不正確。"), { status: 401 });
   }
 
+  clearLoginFailures(request, env);
   const sessionValue = await createSessionValue(password, env.SESSION_SECRET);
   return new Response(null, {
     status: 302,
@@ -894,7 +993,7 @@ export default {
       if (!findTarget(region, instanceId)) {
         return jsonResponse({ error: "指定的機器不在清單內。" }, { status: 400 });
       }
-      if (!["start", "stop", "restart"].includes(action)) {
+      if (!["start", "stop"].includes(action)) {
         return jsonResponse({ error: "不支援的操作。" }, { status: 400 });
       }
 
@@ -919,9 +1018,7 @@ export default {
         message:
           action === "start"
             ? "已送出開機請求。"
-            : action === "stop"
-              ? "已送出關機請求。"
-              : "已送出重新啟動流程。",
+            : "已送出關機請求。",
       });
     }
 

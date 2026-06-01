@@ -9,7 +9,13 @@ import worker, {
   getStatus,
   parseDescribeInstancesXml,
   performAction,
+  refreshTargets,
 } from "../src/index.js";
+
+const TWO_US_WEST_TARGETS = [
+  { region: "us-west-2", instanceId: "i-1", name: "SEA-1" },
+  { region: "us-west-2", instanceId: "i-2", name: "SEA-2" },
+];
 
 function makeEnv(overrides = {}) {
   return {
@@ -47,6 +53,45 @@ test("POST /login with valid password sets a session cookie", async () => {
 
   assert.equal(response.status, 302);
   assert.match(response.headers.get("set-cookie") || "", /ec2_session=/);
+});
+
+test("POST /login rate limits repeated failed attempts by IP", async () => {
+  const loginFailures = new Map();
+  const env = makeEnv({
+    __testHooks: {
+      loginFailures,
+      now: () => 1_700_000_000_000,
+    },
+  });
+
+  for (let index = 0; index < 5; index += 1) {
+    const response = await worker.fetch(
+      new Request("https://example.com/login", {
+        method: "POST",
+        headers: {
+          "cf-connecting-ip": "203.0.113.10",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ password: "wrong-pass" }),
+      }),
+      env,
+    );
+    assert.equal(response.status, 401);
+  }
+
+  const blocked = await worker.fetch(
+    new Request("https://example.com/login", {
+      method: "POST",
+      headers: {
+        "cf-connecting-ip": "203.0.113.10",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ password: "secret-pass" }),
+    }),
+    env,
+  );
+
+  assert.equal(blocked.status, 429);
 });
 
 test("GET /api/status rejects requests without a session", async () => {
@@ -144,7 +189,7 @@ test("getStatus sends DescribeInstances and parses the XML response", async () =
 
   assert.equal(fetchCall.url, "https://ec2.us-west-2.amazonaws.com/");
   assert.match(String(fetchCall.init.body), /Action=DescribeInstances/);
-  assert.match(String(fetchCall.init.body), /InstanceId\.1=i-123/);
+  assert.match(String(fetchCall.init.body), /InstanceId\.1=i-0d50f2b47b60208cb/);
   assert.deepEqual(result, {
     instanceId: "i-123",
     state: "running",
@@ -153,27 +198,19 @@ test("getStatus sends DescribeInstances and parses the XML response", async () =
   });
 });
 
-test("performAction maps restart to StopInstances", async () => {
-  let fetchCall = null;
+test("performAction rejects restart", async () => {
   const env = makeEnv({
     __testHooks: {
-      fetch: async (url, init) => {
-        fetchCall = { url, init };
-        return new Response("<ok />", { status: 200 });
+      fetch: async () => {
+        throw new Error("fetch should not be called");
       },
     },
   });
 
-  const result = await performAction(env, "restart");
-
-  assert.equal(fetchCall.url, "https://ec2.us-west-2.amazonaws.com/");
-  assert.match(String(fetchCall.init.body), /Action=StopInstances/);
-  assert.match(String(fetchCall.init.body), /InstanceId\.1=i-123/);
-  assert.deepEqual(result, {
-    ok: true,
-    action: "restart",
-    phase: "stopping",
-  });
+  await assert.rejects(
+    () => performAction(env, "restart"),
+    /Unsupported action: restart/,
+  );
 });
 
 test("getTargetConfig falls back to built-in region and instance id", () => {
@@ -185,15 +222,23 @@ test("getTargetConfig falls back to built-in region and instance id", () => {
   });
 });
 
+test("getTargetConfig uses the first configured target instead of EC2 env vars", () => {
+  const result = getTargetConfig({
+    AWS_REGION: "ap-northeast-1",
+    EC2_INSTANCE_ID: "i-env-only",
+  });
+
+  assert.deepEqual(result, {
+    region: "us-west-2",
+    instanceId: "i-0d50f2b47b60208cb",
+  });
+});
+
 test("buildRegionGroups groups configured targets by region", () => {
   const groups = buildRegionGroups(TARGETS);
 
-  assert.deepEqual(groups.map((group) => group.region), [
-    "ap-northeast-1",
-    "us-west-2",
-  ]);
+  assert.deepEqual(groups.map((group) => group.region), ["us-west-2"]);
   assert.equal(groups[0].items.length, 1);
-  assert.equal(groups[1].items.length, 2);
 });
 
 test("buildPlaceholderRegions creates per-region placeholders before refresh", () => {
@@ -223,7 +268,8 @@ test("GET / renders grouped placeholder machines without AWS refresh", async () 
   assert.equal(response.status, 200);
   assert.match(text, /未刷新/);
   assert.match(text, /us-west-2/);
-  assert.match(text, /ap-northeast-1/);
+  assert.doesNotMatch(text, /重新啟動/);
+  assert.doesNotMatch(text, /data-action="restart"/);
 });
 
 test("POST /api/action rejects unknown targets", async () => {
@@ -238,6 +284,30 @@ test("POST /api/action rejects unknown targets", async () => {
         region: "us-west-2",
         instanceId: "i-does-not-exist",
         action: "stop",
+      }),
+    }),
+    makeEnv({
+      __testHooks: {
+        verifySession: () => true,
+      },
+    }),
+  );
+
+  assert.equal(response.status, 400);
+});
+
+test("POST /api/action rejects restart", async () => {
+  const response = await worker.fetch(
+    new Request("https://example.com/api/action", {
+      method: "POST",
+      headers: {
+        cookie: "ec2_session=" + encodeURIComponent("signed:secret-pass"),
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        region: "us-west-2",
+        instanceId: "i-0d50f2b47b60208cb",
+        action: "restart",
       }),
     }),
     makeEnv({
@@ -292,10 +362,62 @@ test("POST /api/refresh batches DescribeInstances by region", async () => {
   const payload = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(calls.length, 2);
-  assert.equal(payload.regions.length, 2);
+  assert.equal(calls.length, 1);
+  assert.equal(payload.regions.length, 1);
   assert.match(String(calls[0].init.body), /Action=DescribeInstances/);
-  assert.match(String(calls[1].init.body), /Action=DescribeInstances/);
+});
+
+test("refreshTargets maps multiple instances returned in one region", async () => {
+  const payload = await refreshTargets(
+    makeEnv({
+      __testHooks: {
+        fetch: async () =>
+          new Response(
+            `<?xml version="1.0" encoding="UTF-8"?>
+            <DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+              <reservationSet>
+                <item>
+                  <instancesSet>
+                    <item>
+                      <instanceId>i-1</instanceId>
+                      <dnsName>i-1.example.internal</dnsName>
+                      <instanceState><name>running</name></instanceState>
+                    </item>
+                    <item>
+                      <instanceId>i-2</instanceId>
+                      <dnsName>i-2.example.internal</dnsName>
+                      <instanceState><name>stopped</name></instanceState>
+                    </item>
+                  </instancesSet>
+                </item>
+              </reservationSet>
+            </DescribeInstancesResponse>`,
+            { status: 200, headers: { "content-type": "application/xml" } },
+          ),
+      },
+    }),
+    TWO_US_WEST_TARGETS,
+  );
+
+  assert.deepEqual(
+    payload.regions[0].items.map((item) => ({
+      instanceId: item.instanceId,
+      state: item.state,
+      publicDnsName: item.publicDnsName,
+    })),
+    [
+      {
+        instanceId: "i-1",
+        state: "running",
+        publicDnsName: "i-1.example.internal",
+      },
+      {
+        instanceId: "i-2",
+        state: "stopped",
+        publicDnsName: "i-2.example.internal",
+      },
+    ],
+  );
 });
 
 test("POST /api/action sends the selected target to AWS", async () => {
