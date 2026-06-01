@@ -200,7 +200,7 @@ export function buildPlaceholderRegions(targets = TARGETS) {
   }));
 }
 
-export function getTargetConfig(env) {
+export function getTargetConfig() {
   const [target] = TARGETS;
   if (target) {
     return {
@@ -209,10 +209,7 @@ export function getTargetConfig(env) {
     };
   }
 
-  return {
-    region: env.AWS_REGION || "us-west-2",
-    instanceId: env.EC2_INSTANCE_ID || "i-0d50f2b47b60208cb",
-  };
+  throw new Error("No EC2 targets configured");
 }
 
 function findTarget(region, instanceId, targets = TARGETS) {

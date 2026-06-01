@@ -8,7 +8,7 @@
 - 想用網頁而不是命令列操作 EC2
 - 想集中管理多個地區、多台機器
 - 想查看目前狀態與 `Public IPv4 DNS`
-- 想快速執行 `開機 / 關機 / 重新啟動`
+- 想快速執行 `開機 / 關機`
 
 ## 主要功能
 
@@ -17,7 +17,7 @@
 - 支援每個地區多台 EC2
 - 頁面按地區分組顯示
 - 可手動刷新所有機器狀態
-- 可對單台機器執行開機、關機與重新啟動
+- 可對單台機器執行開機與關機
 
 ## 使用前準備
 
@@ -58,7 +58,17 @@ const TARGETS = [
 
 ## 設定 Cloudflare Secrets
 
-部署前請先設定這 4 個 secrets：
+`wrangler.toml` 內提供了這 5 個環境變量的假值示例：
+
+```toml
+[vars]
+APP_PASSWORD = "change-me"
+AWS_ACCESS_KEY_ID = "AKIAEXAMPLEACCESSKEY"
+AWS_SECRET_ACCESS_KEY = "example-secret-access-key"
+SESSION_SECRET = "replace-with-a-long-random-string"
+```
+
+正式部署時請改成你自己的值。更安全的做法是用 Cloudflare secrets 覆蓋敏感值：
 
 ```text
 wrangler secret put APP_PASSWORD
@@ -73,6 +83,8 @@ wrangler secret put AWS_SECRET_ACCESS_KEY
 - `SESSION_SECRET`：用來保護登入 session 的簽名密鑰
 - `AWS_ACCESS_KEY_ID`：AWS Access Key
 - `AWS_SECRET_ACCESS_KEY`：AWS Secret Key
+
+`AWS_REGION` 和 `EC2_INSTANCE_ID` 都不需要放在 `wrangler.toml`。本程序的 EC2 清單由 `src/index.js` 裡的 `TARGETS` 控制。
 
 ## 部署方式
 
@@ -106,7 +118,6 @@ npx wrangler deploy
 6. 你可以對單台機器執行：
    - `開機`
    - `關機`
-   - `重新啟動`
 
 ## 目前行為說明
 
@@ -120,7 +131,6 @@ npx wrangler deploy
 - 這個專案把機器清單寫在代碼裡，不是從 AWS 自動發現
 - 真正需要保密的是 Cloudflare secrets，不是實例 ID
 - 如果 AWS 金鑰曾經外洩，請立刻輪換
-- 目前 `重新啟動` 比較接近「先送出停止流程」，之後請手動刷新並視情況再次開機
 
 ## 本機檢查
 

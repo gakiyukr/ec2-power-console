@@ -1,7 +1,9 @@
-name = "ec2-workers-console"
+name = "ec2-power-console"
 main = "src/index.js"
 compatibility_date = "2026-05-27"
 
 [vars]
-AWS_REGION = "us-west-2"
-EC2_INSTANCE_ID = "i-0d50f2b47b60208cb"
+APP_PASSWORD = "change-me"
+AWS_ACCESS_KEY_ID = "AKIAEXAMPLEACCESSKEY"
+AWS_SECRET_ACCESS_KEY = "example-secret-access-key"
+SESSION_SECRET = "replace-with-a-long-random-string"

@@ -21,8 +21,6 @@ function makeEnv(overrides = {}) {
   return {
     APP_PASSWORD: "secret-pass",
     SESSION_SECRET: "session-secret",
-    AWS_REGION: "us-west-2",
-    EC2_INSTANCE_ID: "i-123",
     AWS_ACCESS_KEY_ID: "key",
     AWS_SECRET_ACCESS_KEY: "secret",
     ...overrides,
@@ -213,20 +211,8 @@ test("performAction rejects restart", async () => {
   );
 });
 
-test("getTargetConfig falls back to built-in region and instance id", () => {
-  const result = getTargetConfig({});
-
-  assert.deepEqual(result, {
-    region: "us-west-2",
-    instanceId: "i-0d50f2b47b60208cb",
-  });
-});
-
-test("getTargetConfig uses the first configured target instead of EC2 env vars", () => {
-  const result = getTargetConfig({
-    AWS_REGION: "ap-northeast-1",
-    EC2_INSTANCE_ID: "i-env-only",
-  });
+test("getTargetConfig uses the first configured target", () => {
+  const result = getTargetConfig();
 
   assert.deepEqual(result, {
     region: "us-west-2",
