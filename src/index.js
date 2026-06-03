@@ -2,7 +2,10 @@ const SESSION_COOKIE = "ec2_session";
 const LOGIN_FAILURE_LIMIT = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_BLOCK_MS = 15 * 60 * 1000;
+const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const loginFailures = new Map();
+let lastCleanupTime = Date.now();
 
 export const TARGETS = [
   { region: "us-west-2", instanceId: "i-0d50f2b47b60208cb", name: "SEA-1" },
@@ -39,6 +42,17 @@ function fromBase64Url(text) {
   return new TextDecoder().decode(base64ToBytes(padded + "=".repeat(padLength)));
 }
 
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let result = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    result |= a.charCodeAt(index) ^ b.charCodeAt(index);
+  }
+  return result === 0;
+}
+
 async function signText(text, secret) {
   const data = new TextEncoder().encode(secret);
   const key = await crypto.subtle.importKey(
@@ -59,26 +73,33 @@ async function signText(text, secret) {
     .replace(/=+$/g, "");
 }
 
-async function createSessionValue(password, secret) {
-  const payload = toBase64Url(JSON.stringify({ password, issuedAt: Date.now() }));
+async function createSessionValue(secret) {
+  const payload = toBase64Url(JSON.stringify({ authenticated: true, issuedAt: Date.now() }));
   const signature = await signText(payload, secret);
   return `${payload}.${signature}`;
 }
 
-async function verifySessionValue(sessionValue, secret, expectedPassword) {
+async function verifySessionValue(sessionValue, secret) {
   if (!sessionValue || !sessionValue.includes(".")) {
     return false;
   }
 
   const [payload, signature] = sessionValue.split(".", 2);
   const expectedSignature = await signText(payload, secret);
-  if (signature !== expectedSignature) {
+  if (!constantTimeEqual(signature, expectedSignature)) {
     return false;
   }
 
   try {
     const parsed = JSON.parse(fromBase64Url(payload));
-    return parsed.password === expectedPassword;
+    if (!parsed.authenticated) {
+      return false;
+    }
+    const age = Date.now() - parsed.issuedAt;
+    if (age > MAX_SESSION_AGE_MS || age < 0) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -324,7 +345,7 @@ export async function getStatus(env) {
     [target.instanceId],
   );
   if (!response.ok) {
-    throw new Error(`AWS status request failed with ${response.status}`);
+    throw new Error("AWS request failed");
   }
   return parseDescribeInstancesXml(await response.text());
 }
@@ -410,7 +431,7 @@ export async function performAction(env, action) {
     [target.instanceId],
   );
   if (!response.ok) {
-    throw new Error(`AWS action request failed with ${response.status}`);
+    throw new Error("AWS request failed");
   }
 
   return {
@@ -724,8 +745,10 @@ function renderAppPage() {
       const messageEl = document.getElementById("message");
 
       function updateCard(item) {
+        const escapedRegion = CSS.escape(item.region);
+        const escapedInstanceId = CSS.escape(item.instanceId);
         const card = document.querySelector(
-          '.machine-card[data-region="' + item.region + '"][data-instance-id="' + item.instanceId + '"]',
+          \`.machine-card[data-region="\${escapedRegion}"][data-instance-id="\${escapedInstanceId}"]\`
         );
         if (!card) return;
         card.querySelector(".machine-name").textContent = item.displayName;
@@ -754,6 +777,11 @@ function renderAppPage() {
       }
 
       async function runAction(region, instanceId, action) {
+        if (action === "stop") {
+          if (!confirm("確定要關機嗎？此操作將停止 EC2 實例。")) {
+            return;
+          }
+        }
         messageEl.textContent = "處理中...";
         const response = await fetch("/api/action", {
           method: "POST",
@@ -799,6 +827,10 @@ function htmlResponse(html, init = {}) {
     ...init,
     headers: {
       "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'self'",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY",
+      "referrer-policy": "no-referrer",
       ...(init.headers || {}),
     },
   });
@@ -820,7 +852,7 @@ async function isAuthenticated(request, env) {
   }
 
   const sessionValue = getSessionFromRequest(request);
-  return verifySessionValue(sessionValue, env.SESSION_SECRET, env.APP_PASSWORD);
+  return verifySessionValue(sessionValue, env.SESSION_SECRET);
 }
 
 function getLoginFailureStore(env) {
@@ -828,11 +860,7 @@ function getLoginFailureStore(env) {
 }
 
 function getClientIp(request) {
-  return (
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim() ||
-    "unknown"
-  );
+  return request.headers.get("cf-connecting-ip") || "unknown";
 }
 
 function nowMs(env) {
@@ -884,7 +912,34 @@ function clearLoginFailures(request, env) {
   getLoginFailureStore(env).delete(getClientIp(request));
 }
 
+function cleanupExpiredFailures(env) {
+  const now = nowMs(env);
+  if (now - lastCleanupTime < CLEANUP_INTERVAL_MS) {
+    return;
+  }
+
+  const store = getLoginFailureStore(env);
+  const expiredKeys = [];
+
+  for (const [key, record] of store.entries()) {
+    if (record.firstFailureAt + LOGIN_WINDOW_MS <= now &&
+        (!record.blockedUntil || record.blockedUntil <= now)) {
+      expiredKeys.push(key);
+    }
+  }
+
+  for (const key of expiredKeys) {
+    store.delete(key);
+  }
+
+  if (!env.__testHooks?.now) {
+    lastCleanupTime = now;
+  }
+}
+
 async function handleLogin(request, env) {
+  cleanupExpiredFailures(env);
+
   if (isLoginBlocked(request, env)) {
     return htmlResponse(renderLoginPage("登入嘗試過多，請稍後再試。"), { status: 429 });
   }
@@ -897,7 +952,7 @@ async function handleLogin(request, env) {
   }
 
   clearLoginFailures(request, env);
-  const sessionValue = await createSessionValue(password, env.SESSION_SECRET);
+  const sessionValue = await createSessionValue(env.SESSION_SECRET);
   return new Response(null, {
     status: 302,
     headers: {
@@ -979,6 +1034,11 @@ export default {
 
       if (request.method !== "POST") {
         return jsonResponse({ error: "Method not allowed" }, { status: 405 });
+      }
+
+      const contentLength = parseInt(request.headers.get("content-length") || "0", 10);
+      if (contentLength > 10240) {
+        return jsonResponse({ error: "請求內容過大。" }, { status: 413 });
       }
 
       const body = await request.json().catch(() => null);

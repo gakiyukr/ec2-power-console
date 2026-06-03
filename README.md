@@ -24,16 +24,36 @@
 在部署之前，你需要準備：
 
 - 一個 Cloudflare 帳號
-- 一組可操作 EC2 的 AWS 金鑰
+- 一組可操作 EC2 的 AWS 金鑰（建議使用 IAM 策略限制權限範圍）
 - 你要管理的 EC2 實例 ID
 - 對應的 AWS 地區
 - Node.js 與 npm
 
-AWS 金鑰至少需要能呼叫這些 EC2 API：
+**AWS IAM 最小權限建議**：
 
-- `DescribeInstances`
-- `StartInstances`
-- `StopInstances`
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:StartInstances",
+        "ec2:StopInstances"
+      ],
+      "Resource": "arn:aws:ec2:*:*:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/ManagedBy": "ec2-power-console"
+        }
+      }
+    }
+  ]
+}
+```
+
+建議在你的 EC2 實例上添加標籤 `ManagedBy=ec2-power-console` 以限制操作範圍。
 
 ## 先設定要管理的機器
 
@@ -56,35 +76,56 @@ const TARGETS = [
 
 如果你不填 `name`，系統會自動用其他資訊補上顯示名稱。
 
-## 設定 Cloudflare Secrets
+## 設定環境變量
 
-`wrangler.toml` 內提供了這 5 個環境變量的假值示例：
+### 本地開發
 
-```toml
-[vars]
-APP_PASSWORD = "change-me"
-AWS_ACCESS_KEY_ID = "AKIAEXAMPLEACCESSKEY"
-AWS_SECRET_ACCESS_KEY = "example-secret-access-key"
-SESSION_SECRET = "replace-with-a-long-random-string"
+1. 複製環境變量範例文件：
+
+```bash
+cp .env.example .env
 ```
 
-正式部署時請改成你自己的值。更安全的做法是用 Cloudflare secrets 覆蓋敏感值：
+2. 編輯 `.env` 文件，填入實際值：
 
-```text
+```bash
+# 應用密碼 - 用於登入網頁控制台
+APP_PASSWORD=your-strong-password-here
+
+# Session 簽名密鑰 - 建議使用強隨機字符串（至少 32 字符）
+# 可以用以下命令生成: openssl rand -base64 32
+SESSION_SECRET=your-long-random-string-at-least-32-chars
+
+# AWS 憑證
+AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=YOUR_AWS_SECRET_KEY
+```
+
+### 生產環境部署
+
+正式部署到 Cloudflare Workers 時，請使用 `wrangler secret` 命令安全地設置環境變量：
+
+```bash
 wrangler secret put APP_PASSWORD
 wrangler secret put SESSION_SECRET
 wrangler secret put AWS_ACCESS_KEY_ID
 wrangler secret put AWS_SECRET_ACCESS_KEY
 ```
 
-它們的用途如下：
+執行每個命令後，系統會提示你輸入對應的值。這些值會加密存儲在 Cloudflare 中，不會出現在代碼或配置文件裡。
 
-- `APP_PASSWORD`：你登入網頁時要輸入的密碼
-- `SESSION_SECRET`：用來保護登入 session 的簽名密鑰
+**環境變量說明**：
+
+- `APP_PASSWORD`：登入網頁時要輸入的密碼（建議使用強密碼）
+- `SESSION_SECRET`：用來簽名和驗證登入 session 的密鑰（建議至少 32 字符的隨機字符串）
 - `AWS_ACCESS_KEY_ID`：AWS Access Key
 - `AWS_SECRET_ACCESS_KEY`：AWS Secret Key
 
-`AWS_REGION` 和 `EC2_INSTANCE_ID` 都不需要放在 `wrangler.toml`。本程序的 EC2 清單由 `src/index.js` 裡的 `TARGETS` 控制。
+**安全提醒**：
+- 切勿將 `.env` 文件提交到版本控制系統
+- `SESSION_SECRET` 應該使用加密學安全的隨機字符串
+- 定期輪換 AWS 憑證
+- 使用 IAM 策略限制 AWS 憑證的權限範圍
 
 ## 部署方式
 
@@ -131,6 +172,19 @@ npx wrangler deploy
 - 這個專案把機器清單寫在代碼裡，不是從 AWS 自動發現
 - 真正需要保密的是 Cloudflare secrets，不是實例 ID
 - 如果 AWS 金鑰曾經外洩，請立刻輪換
+
+## 安全特性
+
+本項目實現了以下安全措施：
+
+- ✅ **Session 安全**：使用 HMAC-SHA256 簽名，24 小時自動過期
+- ✅ **防時序攻擊**：使用恆定時間比較驗證簽名
+- ✅ **登入速率限制**：基於 IP 的失敗登入限制（5 次失敗後封鎖 15 分鐘）
+- ✅ **安全 Cookie**：HttpOnly、Secure、SameSite=Strict 屬性
+- ✅ **內容安全策略**：CSP headers 防止 XSS 攻擊
+- ✅ **輸入驗證**：只允許操作預先配置的 EC2 實例
+- ✅ **HTML 轉義**：防止注入攻擊
+- ✅ **記憶體管理**：定期清理過期的登入失敗記錄
 
 ## 本機檢查
 

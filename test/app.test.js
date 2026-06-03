@@ -50,7 +50,9 @@ test("POST /login with valid password sets a session cookie", async () => {
   );
 
   assert.equal(response.status, 302);
-  assert.match(response.headers.get("set-cookie") || "", /ec2_session=/);
+  const cookie = response.headers.get("set-cookie") || "";
+  assert.match(cookie, /ec2_session=/);
+  assert.doesNotMatch(cookie, /secret-pass/);
 });
 
 test("POST /login rate limits repeated failed attempts by IP", async () => {
