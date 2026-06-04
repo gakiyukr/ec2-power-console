@@ -203,6 +203,21 @@ export function buildRegionGroups(targets = TARGETS) {
     }));
 }
 
+export function deriveIpFromPublicDns(publicDnsName) {
+  const match = String(publicDnsName || "").match(
+    /^ec2-(\d{1,3})-(\d{1,3})-(\d{1,3})-(\d{1,3})\.[a-z0-9-]+\.compute(?:-1)?\.amazonaws\.com(?:\.cn)?$/i,
+  );
+  if (!match) {
+    return "";
+  }
+
+  const octets = match.slice(1).map(Number);
+  if (octets.some((octet) => octet > 255)) {
+    return "";
+  }
+  return octets.join(".");
+}
+
 function computeFallbackName(region, index) {
   return `${region} #${index + 1}`;
 }
@@ -216,6 +231,8 @@ export function buildPlaceholderRegions(targets = TARGETS) {
       region: item.region,
       state: "未刷新",
       publicDnsName: "未刷新",
+      publicIpAddress: "未刷新",
+      isWlInstance: false,
       awsNameTag: "",
     })),
   }));
@@ -314,6 +331,8 @@ export function parseDescribeInstancesXml(xml) {
     instanceId: "",
     state: "",
     publicDnsName: "",
+    publicIpAddress: "",
+    isWlInstance: false,
     awsNameTag: "",
   };
 }
@@ -323,10 +342,16 @@ export function parseDescribeInstancesXmlItems(xml) {
   return instanceMatches.map((match, index) => {
     const nextMatch = instanceMatches[index + 1];
     const segment = xml.slice(match.index, nextMatch?.index ?? xml.length);
+    const publicDnsName = findTagValue(segment, "dnsName");
+    const awsPublicIpAddress = findTagValue(segment, "ipAddress");
+    const derivedPublicIpAddress = deriveIpFromPublicDns(publicDnsName);
+    const isWlInstance = Boolean(publicDnsName && !awsPublicIpAddress && derivedPublicIpAddress);
     return {
       instanceId: match[1],
       state: findTagValue(segment, "name"),
-      publicDnsName: findTagValue(segment, "dnsName"),
+      publicDnsName,
+      publicIpAddress: awsPublicIpAddress || derivedPublicIpAddress,
+      isWlInstance,
       awsNameTag: extractAwsNameTag(segment),
     };
   });
@@ -376,6 +401,8 @@ export async function refreshTargets(env, targets = TARGETS) {
           region: item.region,
           state: "查詢失敗",
           publicDnsName: "查詢失敗",
+          publicIpAddress: "查詢失敗",
+          isWlInstance: false,
           awsNameTag: "",
         })),
       });
@@ -404,6 +431,8 @@ export async function refreshTargets(env, targets = TARGETS) {
           region: item.region,
           state: match?.state || "未找到",
           publicDnsName: match?.publicDnsName || "未找到",
+          publicIpAddress: match?.publicIpAddress || "未找到",
+          isWlInstance: Boolean(match?.isWlInstance),
           awsNameTag,
         };
       }),
@@ -464,6 +493,18 @@ function getStateBadge(state) {
   }
   
   return `<span class="state-badge ${badgeClass}"><span class="badge-dot"></span><span class="state">${escapeHtml(text)}</span></span>`;
+}
+
+function isCopyableValue(value) {
+  return Boolean(value && value !== "未刷新" && value !== "查詢失敗" && value !== "未找到");
+}
+
+function renderCopyButton(value, title) {
+  const displayStyle = isCopyableValue(value) ? "" : "display: none;";
+  return `<button type="button" class="copy-btn" data-copy="${escapeHtml(value)}" style="${displayStyle}" title="${escapeHtml(title)}">
+    <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+    <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+  </button>`;
 }
 
 function renderLoginPage(errorMessage = "") {
@@ -646,7 +687,10 @@ function renderRegionSections(regions) {
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
                       </div>
                       <div class="machine-details">
-                        <strong class="machine-name">${escapeHtml(item.displayName)}</strong>
+                        <div class="machine-title-row">
+                          <strong class="machine-name">${escapeHtml(item.displayName)}</strong>
+                          <span class="wl-badge" style="${item.isWlInstance ? "" : "display: none;"}">WL</span>
+                        </div>
                         <span class="machine-id">${escapeHtml(item.instanceId)}</span>
                       </div>
                       <span class="region-badge">${escapeHtml(item.region)}</span>
@@ -661,10 +705,14 @@ function renderRegionSections(regions) {
                         <span class="info-label">公有 DNS</span>
                         <div class="dns-container">
                           <span class="info-value dns">${escapeHtml(item.publicDnsName)}</span>
-                          <button type="button" class="copy-btn" data-copy="${escapeHtml(item.publicDnsName)}" style="${item.publicDnsName !== '未刷新' && item.publicDnsName !== '查詢失敗' && item.publicDnsName !== '未找到' ? '' : 'display: none;'}" title="複製公有 DNS">
-                            <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                            <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                          </button>
+                          ${renderCopyButton(item.publicDnsName, "複製公有 DNS")}
+                        </div>
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">公網 IP / 出站 IP</span>
+                        <div class="dns-container">
+                          <span class="info-value public-ip">${escapeHtml(item.publicIpAddress)}</span>
+                          ${renderCopyButton(item.publicIpAddress, "複製公網 IP / 出站 IP")}
                         </div>
                       </div>
                     </div>
@@ -841,14 +889,31 @@ function renderAppPage() {
         flex-grow: 1;
         min-width: 0;
       }
+      .machine-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
       .machine-name {
-        display: block;
+        display: inline-block;
         font-size: 0.95rem;
         font-weight: 600;
         color: var(--text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .wl-badge {
+        flex-shrink: 0;
+        border: 1px solid #f59e0b;
+        background: #fffbeb;
+        color: #b45309;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1.45;
       }
       .machine-id {
         display: block;
@@ -882,6 +947,7 @@ function renderAppPage() {
       .info-label {
         color: var(--text-secondary);
         font-weight: 500;
+        flex-shrink: 0;
       }
       .info-value {
         color: var(--text-primary);
@@ -892,10 +958,13 @@ function renderAppPage() {
       .dns-container {
         display: inline-flex;
         align-items: center;
+        justify-content: flex-end;
         gap: 6px;
         max-width: 180px;
+        min-width: 0;
       }
-      .dns-container .dns {
+      .dns-container .dns,
+      .dns-container .public-ip {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1186,6 +1255,21 @@ function renderAppPage() {
         return "badge-unknown";
       }
 
+      function isCopyableValue(value) {
+        return Boolean(value && value !== "未刷新" && value !== "查詢失敗" && value !== "未找到");
+      }
+
+      function updateCopyButton(button, value) {
+        if (!button) return;
+        if (isCopyableValue(value)) {
+          button.dataset.copy = value;
+          button.style.display = "inline-flex";
+        } else {
+          button.dataset.copy = "";
+          button.style.display = "none";
+        }
+      }
+
       function updateCard(item) {
         const escapedRegion = CSS.escape(item.region);
         const escapedInstanceId = CSS.escape(item.instanceId);
@@ -1194,6 +1278,11 @@ function renderAppPage() {
         );
         if (!card) return;
         card.querySelector(".machine-name").textContent = item.displayName;
+
+        const wlBadge = card.querySelector(".wl-badge");
+        if (wlBadge) {
+          wlBadge.style.display = item.isWlInstance ? "inline-flex" : "none";
+        }
         
         const stateEl = card.querySelector(".state");
         if (stateEl) {
@@ -1209,15 +1298,13 @@ function renderAppPage() {
           dnsEl.textContent = item.publicDnsName;
         }
 
-        const copyBtn = card.querySelector(".copy-btn");
-        if (copyBtn) {
-          if (item.publicDnsName && item.publicDnsName !== "未刷新" && item.publicDnsName !== "查詢失敗" && item.publicDnsName !== "未找到") {
-            copyBtn.dataset.copy = item.publicDnsName;
-            copyBtn.style.display = "inline-flex";
-          } else {
-            copyBtn.style.display = "none";
-          }
+        const publicIpEl = card.querySelector(".public-ip");
+        if (publicIpEl) {
+          publicIpEl.textContent = item.publicIpAddress;
         }
+
+        updateCopyButton(card.querySelector(".dns-container .dns + .copy-btn"), item.publicDnsName);
+        updateCopyButton(card.querySelector(".dns-container .public-ip + .copy-btn"), item.publicIpAddress);
       }
 
       function applyRefreshPayload(data) {

@@ -5,6 +5,7 @@ import worker, {
   TARGETS,
   buildPlaceholderRegions,
   buildRegionGroups,
+  deriveIpFromPublicDns,
   getTargetConfig,
   getStatus,
   parseDescribeInstancesXml,
@@ -127,8 +128,22 @@ test("parseDescribeInstancesXml extracts state and public DNS name", () => {
     instanceId: "i-123",
     state: "running",
     publicDnsName: "ec2-155-146-132-179.us-west-2.compute.amazonaws.com",
+    publicIpAddress: "155.146.132.179",
+    isWlInstance: true,
     awsNameTag: "",
   });
+});
+
+test("deriveIpFromPublicDns returns IPv4 address from AWS public DNS names", () => {
+  assert.equal(
+    deriveIpFromPublicDns("ec2-155-146-130-24.us-west-2.compute.amazonaws.com"),
+    "155.146.130.24",
+  );
+  assert.equal(
+    deriveIpFromPublicDns("ec2-155-146-130-24.us-west-2.compute-1.amazonaws.com.cn"),
+    "155.146.130.24",
+  );
+  assert.equal(deriveIpFromPublicDns("i-1.example.internal"), "");
 });
 
 test("GET /api/status returns instance state and DNS when authenticated", async () => {
@@ -145,6 +160,8 @@ test("GET /api/status returns instance state and DNS when authenticated", async 
           instanceId: "i-123",
           state: "running",
           publicDnsName: "ec2-155-146-132-179.us-west-2.compute.amazonaws.com",
+          publicIpAddress: "155.146.132.179",
+          isWlInstance: true,
         }),
       },
     }),
@@ -155,6 +172,8 @@ test("GET /api/status returns instance state and DNS when authenticated", async 
     instanceId: "i-123",
     state: "running",
     publicDnsName: "ec2-155-146-132-179.us-west-2.compute.amazonaws.com",
+    publicIpAddress: "155.146.132.179",
+    isWlInstance: true,
   });
 });
 
@@ -194,6 +213,8 @@ test("getStatus sends DescribeInstances and parses the XML response", async () =
     instanceId: "i-123",
     state: "running",
     publicDnsName: "ec2-155-146-132-179.us-west-2.compute.amazonaws.com",
+    publicIpAddress: "155.146.132.179",
+    isWlInstance: true,
     awsNameTag: "",
   });
 });
@@ -235,6 +256,8 @@ test("buildPlaceholderRegions creates per-region placeholders before refresh", (
 
   assert.equal(firstUsWest.state, "未刷新");
   assert.equal(firstUsWest.publicDnsName, "未刷新");
+  assert.equal(firstUsWest.publicIpAddress, "未刷新");
+  assert.equal(firstUsWest.isWlInstance, false);
   assert.equal(firstUsWest.region, "us-west-2");
 });
 
@@ -256,6 +279,9 @@ test("GET / renders grouped placeholder machines without AWS refresh", async () 
   assert.equal(response.status, 200);
   assert.match(text, /未刷新/);
   assert.match(text, /us-west-2/);
+  assert.match(text, /wl-badge/);
+  assert.match(text, /公網 IP \/ 出站 IP/);
+  assert.match(text, /public-ip/);
   assert.doesNotMatch(text, /重新啟動/);
   assert.doesNotMatch(text, /data-action="restart"/);
 });
@@ -392,20 +418,57 @@ test("refreshTargets maps multiple instances returned in one region", async () =
       instanceId: item.instanceId,
       state: item.state,
       publicDnsName: item.publicDnsName,
+      publicIpAddress: item.publicIpAddress,
+      isWlInstance: item.isWlInstance,
     })),
     [
       {
         instanceId: "i-1",
         state: "running",
         publicDnsName: "i-1.example.internal",
+        publicIpAddress: "未找到",
+        isWlInstance: false,
       },
       {
         instanceId: "i-2",
         state: "stopped",
         publicDnsName: "i-2.example.internal",
+        publicIpAddress: "未找到",
+        isWlInstance: false,
       },
     ],
   );
+});
+
+test("refreshTargets marks WL instances and derives IP from public DNS when AWS has no public IP", async () => {
+  const payload = await refreshTargets(
+    makeEnv({
+      __testHooks: {
+        fetch: async () =>
+          new Response(
+            `<?xml version="1.0" encoding="UTF-8"?>
+            <DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+              <reservationSet>
+                <item>
+                  <instancesSet>
+                    <item>
+                      <instanceId>i-1</instanceId>
+                      <dnsName>ec2-155-146-130-24.us-west-2.compute.amazonaws.com</dnsName>
+                      <instanceState><name>running</name></instanceState>
+                    </item>
+                  </instancesSet>
+                </item>
+              </reservationSet>
+            </DescribeInstancesResponse>`,
+            { status: 200, headers: { "content-type": "application/xml" } },
+          ),
+      },
+    }),
+    [{ region: "us-west-2", instanceId: "i-1", name: "SEA-1" }],
+  );
+
+  assert.equal(payload.regions[0].items[0].publicIpAddress, "155.146.130.24");
+  assert.equal(payload.regions[0].items[0].isWlInstance, true);
 });
 
 test("POST /api/action sends the selected target to AWS", async () => {
