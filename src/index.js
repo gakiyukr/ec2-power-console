@@ -448,9 +448,30 @@ function escapeHtml(text) {
     .replaceAll('"', "&quot;");
 }
 
+function getStateBadge(state) {
+  const s = (state || "").toLowerCase().trim();
+  let badgeClass = "badge-unknown";
+  let text = state;
+  
+  if (s === "running") {
+    badgeClass = "badge-running";
+  } else if (s === "stopped") {
+    badgeClass = "badge-stopped";
+  } else if (["pending", "stopping", "shutting-down"].includes(s) || s.includes("中")) {
+    badgeClass = "badge-pending";
+  } else if (s === "查詢失敗") {
+    badgeClass = "badge-failed";
+  }
+  
+  return `<span class="state-badge ${badgeClass}"><span class="badge-dot"></span><span class="state">${escapeHtml(text)}</span></span>`;
+}
+
 function renderLoginPage(errorMessage = "") {
   const errorHtml = errorMessage
-    ? `<p class="error">${escapeHtml(errorMessage)}</p>`
+    ? `<div class="error-block">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        <span>${escapeHtml(errorMessage)}</span>
+       </div>`
     : "";
 
   return `<!doctype html>
@@ -461,83 +482,139 @@ function renderLoginPage(errorMessage = "") {
     <title>EC2 控制台登入</title>
     <style>
       :root {
-        --bg: #f2eee4;
-        --panel: #fffaf0;
-        --ink: #162521;
-        --accent: #0f766e;
-        --accent-dark: #115e59;
-        --error: #b42318;
+        --bg: #f8fafc;
+        --card-bg: #ffffff;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --border: #e2e8f0;
+        --primary: #0f172a;
+        --primary-hover: #1e293b;
+        --error-bg: #fef2f2;
+        --error-text: #b91c1c;
+        --error-border: #fecaca;
       }
       body {
         margin: 0;
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background:
-          radial-gradient(circle at top left, #fcd34d 0, transparent 32%),
-          linear-gradient(145deg, #f3efe2, #dbe7dd);
-        color: var(--ink);
-        font-family: "Microsoft YaHei", "Microsoft JhengHei", sans-serif;
+        background: radial-gradient(at 0% 0%, #f1f5f9 0px, transparent 50%), radial-gradient(at 50% 0%, #e2e8f0 0px, transparent 50%), radial-gradient(at 100% 0%, #f8fafc 0px, transparent 50%), #fafafa;
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Microsoft YaHei", "Microsoft JhengHei", sans-serif;
       }
       .card {
-        width: min(92vw, 420px);
-        background: var(--panel);
-        border: 1px solid rgba(22, 37, 33, 0.12);
-        border-radius: 20px;
-        padding: 28px;
-        box-shadow: 0 16px 48px rgba(22, 37, 33, 0.14);
+        width: min(90vw, 380px);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 32px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03);
+      }
+      .icon-header {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: #f1f5f9;
+        color: #0f172a;
+        margin-bottom: 24px;
       }
       h1 {
         margin-top: 0;
-        margin-bottom: 12px;
-        font-size: 2rem;
+        margin-bottom: 8px;
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
       }
       p {
         line-height: 1.5;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        margin-bottom: 24px;
+        margin-top: 0;
       }
       label {
         display: block;
-        margin-top: 18px;
         margin-bottom: 8px;
-        font-weight: 700;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-primary);
       }
       input {
         box-sizing: border-box;
         width: 100%;
-        padding: 12px 14px;
-        border: 1px solid rgba(22, 37, 33, 0.2);
-        border-radius: 12px;
+        padding: 10px 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
         font: inherit;
+        font-size: 0.95rem;
+        background-color: #ffffff;
+        color: var(--text-primary);
+        transition: all 0.2s ease;
+      }
+      input:focus {
+        outline: none;
+        border-color: #0f172a;
+        box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
       }
       button {
-        margin-top: 18px;
-        padding: 12px 18px;
+        width: 100%;
+        margin-top: 24px;
+        padding: 10px 18px;
         border: 0;
-        border-radius: 999px;
-        background: var(--accent);
+        border-radius: 8px;
+        background: var(--primary);
         color: white;
         font: inherit;
-        font-weight: 700;
+        font-weight: 500;
+        font-size: 0.95rem;
         cursor: pointer;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
       }
       button:hover {
-        background: var(--accent-dark);
+        background: var(--primary-hover);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
       }
-      .error {
-        color: var(--error);
-        font-weight: 700;
+      button:active {
+        transform: translateY(0);
+      }
+      .error-block {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--error-bg);
+        border: 1px solid var(--error-border);
+        color: var(--error-text);
+        padding: 10px 14px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-size: 0.85rem;
+        font-weight: 500;
       }
     </style>
   </head>
   <body>
     <main class="card">
+      <div class="icon-header">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lock-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+      </div>
       <h1>請輸入密碼</h1>
       <p>請使用共享密碼登入 WL EC2 控制台。</p>
       ${errorHtml}
       <form method="post" action="/login">
         <label for="password">密碼</label>
         <input id="password" name="password" type="password" required autofocus>
-        <button type="submit">登入控制台</button>
+        <button type="submit">
+          <span>登入控制台</span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+        </button>
       </form>
     </main>
   </body>
@@ -550,29 +627,61 @@ function renderRegionSections(regions) {
       (region) => `
         <section class="region-block" data-region="${escapeHtml(region.region)}">
           <header class="region-header">
-            <h2>${escapeHtml(region.region)}</h2>
-            <button type="button" class="secondary" data-refresh-region="${escapeHtml(region.region)}">刷新狀態</button>
+            <div class="region-title">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-secondary);"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+              <h2>${escapeHtml(region.region)}</h2>
+            </div>
+            <button type="button" class="secondary refresh-btn" data-refresh-region="${escapeHtml(region.region)}">
+              <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              <span>整理地區</span>
+            </button>
           </header>
           <div class="machine-list">
             ${region.items
               .map(
                 (item) => `
                   <article class="machine-card" data-region="${escapeHtml(item.region)}" data-instance-id="${escapeHtml(item.instanceId)}">
-                    <div class="machine-main">
-                      <div>
-                        <strong class="machine-name">${escapeHtml(item.displayName)}</strong>
-                        <div class="meta">${escapeHtml(item.instanceId)}</div>
+                    <div class="machine-header">
+                      <div class="machine-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
                       </div>
-                      <div class="meta">${escapeHtml(item.region)}</div>
+                      <div class="machine-details">
+                        <strong class="machine-name">${escapeHtml(item.displayName)}</strong>
+                        <span class="machine-id">${escapeHtml(item.instanceId)}</span>
+                      </div>
+                      <span class="region-badge">${escapeHtml(item.region)}</span>
                     </div>
-                    <div class="machine-stats">
-                      <div><span class="label">狀態</span><span class="value state">${escapeHtml(item.state)}</span></div>
-                      <div><span class="label">公有 IPv4 DNS</span><span class="value dns">${escapeHtml(item.publicDnsName)}</span></div>
+                    
+                    <div class="machine-info-row">
+                      <div class="info-item">
+                        <span class="info-label">狀態</span>
+                        ${getStateBadge(item.state)}
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">公有 DNS</span>
+                        <div class="dns-container">
+                          <span class="info-value dns">${escapeHtml(item.publicDnsName)}</span>
+                          <button type="button" class="copy-btn" data-copy="${escapeHtml(item.publicDnsName)}" style="${item.publicDnsName !== '未刷新' && item.publicDnsName !== '查詢失敗' && item.publicDnsName !== '未找到' ? '' : 'display: none;'}" title="複製公有 DNS">
+                            <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                            <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: none;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div class="actions">
-                      <button type="button" class="secondary" data-action="refresh-one">刷新狀態</button>
-                      <button type="button" data-action="start">開機</button>
-                      <button type="button" class="warn" data-action="stop">關機</button>
+                    
+                    <div class="card-actions">
+                      <button type="button" class="secondary" data-action="refresh-one">
+                        <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                        <span>刷新</span>
+                      </button>
+                      <button type="button" class="start-btn" data-action="start">
+                        <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+                        <span>開機</span>
+                      </button>
+                      <button type="button" class="warn stop-btn" data-action="stop">
+                        <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line></svg>
+                        <span>關機</span>
+                      </button>
                     </div>
                   </article>
                 `,
@@ -596,153 +705,486 @@ function renderAppPage() {
     <title>EC2 控制台</title>
     <style>
       :root {
-        --bg: #f2eee4;
-        --panel: rgba(255, 250, 240, 0.94);
-        --ink: #162521;
-        --muted: #4b635d;
-        --accent: #0f766e;
-        --accent-dark: #115e59;
-        --warn: #b54708;
+        --bg: #f8fafc;
+        --card-bg: #ffffff;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --border: #e2e8f0;
+        --border-hover: #cbd5e1;
+        --primary: #0f172a;
+        --primary-hover: #1e293b;
+        --secondary-bg: #f8fafc;
+        --secondary-hover: #f1f5f9;
+        
+        --success-bg: #ecfdf5;
+        --success-text: #047857;
+        --success-border: #a7f3d0;
+        
+        --danger-bg: #fff1f2;
+        --danger-text: #be123c;
+        --danger-border: #fecdd3;
+        
+        --warning-bg: #fef3c7;
+        --warning-text: #b45309;
+        --warning-border: #fde68a;
+        
+        --gray-bg: #f1f5f9;
+        --gray-text: #475569;
+        --gray-border: #cbd5e1;
       }
       body {
         margin: 0;
         min-height: 100vh;
-        background:
-          radial-gradient(circle at top left, rgba(252, 211, 77, 0.55) 0, transparent 28%),
-          linear-gradient(160deg, #efe7d7, #d9e8e3);
-        color: var(--ink);
-        font-family: "Microsoft YaHei", "Microsoft JhengHei", sans-serif;
+        background-color: var(--bg);
+        color: var(--text-primary);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Microsoft YaHei", "Microsoft JhengHei", sans-serif;
       }
       .shell {
-        max-width: 1100px;
+        max-width: 1000px;
         margin: 0 auto;
-        padding: 24px;
+        padding: 32px 16px;
+        animation: fadeIn 0.4s ease-out;
       }
-      .hero,
-      .panel,
-      .region-block {
-        background: var(--panel);
-        border: 1px solid rgba(22, 37, 33, 0.12);
-        border-radius: 24px;
-        box-shadow: 0 18px 48px rgba(22, 37, 33, 0.14);
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
       }
-      .hero {
-        padding: 28px;
-        margin-bottom: 20px;
+      .app-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 32px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+        gap: 16px;
       }
-      .hero h1 {
-        margin: 0 0 8px;
-        font-size: clamp(2rem, 5vw, 3rem);
+      .app-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
-      .hero p {
+      .app-brand h1 {
         margin: 0;
-        color: var(--muted);
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--text-primary);
       }
-      .panel {
-        padding: 20px 24px;
-        margin-bottom: 20px;
+      .brand-icon {
+        color: var(--text-primary);
+      }
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
       }
       .region-block {
-        padding: 20px;
-        margin-bottom: 18px;
+        margin-bottom: 32px;
       }
       .region-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 12px;
         margin-bottom: 16px;
       }
-      .region-header h2 {
+      .region-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .region-title h2 {
         margin: 0;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
       }
       .machine-list {
         display: grid;
-        gap: 14px;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 16px;
       }
       .machine-card {
-        padding: 18px;
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.66);
-      }
-      .machine-main,
-      .machine-stats {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         display: flex;
-        justify-content: space-between;
+        flex-direction: column;
         gap: 16px;
-        flex-wrap: wrap;
       }
-      .machine-stats {
-        margin-top: 12px;
+      .machine-card:hover {
+        border-color: var(--border-hover);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+        transform: translateY(-2px);
+      }
+      .machine-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .machine-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background-color: var(--gray-bg);
+        color: var(--text-secondary);
+        flex-shrink: 0;
+      }
+      .machine-details {
+        flex-grow: 1;
+        min-width: 0;
       }
       .machine-name {
-        font-size: 1.1rem;
-      }
-      .meta,
-      .label,
-      #message {
-        color: var(--muted);
-      }
-      .label {
         display: block;
-        font-size: 0.9rem;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .value {
+      .machine-id {
         display: block;
-        margin-top: 6px;
-        font-weight: 700;
-        word-break: break-word;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+        margin-top: 2px;
       }
-      .actions {
+      .region-badge {
+        font-size: 0.75rem;
+        background-color: var(--gray-bg);
+        color: var(--text-secondary);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .machine-info-row {
         display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 16px;
+        flex-direction: column;
+        gap: 10px;
+        font-size: 0.85rem;
+        padding: 12px 0;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .info-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .info-label {
+        color: var(--text-secondary);
+        font-weight: 500;
+      }
+      .info-value {
+        color: var(--text-primary);
+        font-weight: 500;
+        word-break: break-all;
+        text-align: right;
+      }
+      .dns-container {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 180px;
+      }
+      .dns-container .dns {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: inline-block;
+        max-width: 150px;
+      }
+      .copy-btn {
+        background: none;
+        border: none;
+        padding: 4px;
+        color: var(--text-secondary);
+        border-radius: 4px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+      }
+      .copy-btn:hover {
+        background-color: var(--gray-bg);
+        color: var(--text-primary);
+      }
+      .copy-btn.copied {
+        color: var(--success-text);
+        background-color: var(--success-bg);
+      }
+      .card-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .card-actions button {
+        flex: 1;
       }
       button {
-        padding: 12px 18px;
-        border: 0;
-        border-radius: 999px;
-        background: var(--accent);
-        color: white;
         font: inherit;
-        font-weight: 700;
+        font-size: 0.85rem;
+        font-weight: 500;
+        padding: 8px 14px;
+        border-radius: 6px;
         cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: all 0.2s ease;
+        box-sizing: border-box;
       }
-      button.secondary {
-        background: #264653;
+      button:active:not(:disabled) {
+        transform: translateY(0);
       }
-      button.warn {
-        background: var(--warn);
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .btn-icon {
+        flex-shrink: 0;
+      }
+      button.primary, button#refresh-all {
+        background-color: var(--primary);
+        color: #ffffff;
+        border: 1px solid var(--primary);
+      }
+      button.primary:hover:not(:disabled), button#refresh-all:hover:not(:disabled) {
+        background-color: var(--primary-hover);
+        border-color: var(--primary-hover);
+      }
+      button.secondary, button[data-action="refresh-one"], button.refresh-btn {
+        background-color: var(--secondary-bg);
+        color: var(--text-secondary);
+        border: 1px solid var(--border);
+      }
+      button.secondary:hover:not(:disabled), button[data-action="refresh-one"]:hover:not(:disabled), button.refresh-btn:hover:not(:disabled) {
+        background-color: var(--secondary-hover);
+        color: var(--text-primary);
+        border-color: var(--border-hover);
+      }
+      button.start-btn {
+        background-color: #ecfdf5;
+        color: #047857;
+        border: 1px solid #a7f3d0;
+      }
+      button.start-btn:hover:not(:disabled) {
+        background-color: #d1fae5;
+        border-color: #34d399;
+      }
+      button.warn, button.stop-btn {
+        background-color: #fff1f2;
+        color: #be123c;
+        border: 1px solid #fecdd3;
+      }
+      button.warn:hover:not(:disabled), button.stop-btn:hover:not(:disabled) {
+        background-color: #ffe4e6;
+        border-color: #fb7185;
       }
       form.inline {
-        display: inline;
+        display: inline-flex;
       }
-      #message {
-        min-height: 1.4em;
-        margin-top: 14px;
+      
+      /* State Badge styles */
+      .state-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .badge-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .badge-running {
+        background-color: #ecfdf5;
+        color: #047857;
+        border: 1px solid #a7f3d0;
+      }
+      .badge-running .badge-dot {
+        background-color: #10b981;
+      }
+      .badge-stopped {
+        background-color: #fff1f2;
+        color: #be123c;
+        border: 1px solid #fecdd3;
+      }
+      .badge-stopped .badge-dot {
+        background-color: #ef4444;
+      }
+      .badge-pending {
+        background-color: #fef3c7;
+        color: #b45309;
+        border: 1px solid #fde68a;
+      }
+      .badge-pending .badge-dot {
+        background-color: #f59e0b;
+      }
+      .badge-unknown {
+        background-color: #f1f5f9;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+      }
+      .badge-unknown .badge-dot {
+        background-color: #94a3b8;
+      }
+      .badge-failed {
+        background-color: #fff1f2;
+        color: #be123c;
+        border: 1px solid #fecdd3;
+      }
+      .badge-failed .badge-dot {
+        background-color: #ef4444;
+      }
+
+      /* Spinning keyframe animation */
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      .spinning {
+        animation: spin 1.2s linear infinite;
+        display: inline-block;
+      }
+
+      /* Toast Notification styling */
+      .toast-container {
+        position: fixed;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .toast {
+        pointer-events: auto;
+        background: #ffffff;
+        border: 1px solid var(--border);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.03);
+        border-radius: 8px;
+        padding: 10px 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 280px;
+        opacity: 0;
+        transform: translateY(-16px);
+        transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        font-size: 0.85rem;
+        font-weight: 500;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .toast-success {
+        border-left: 3px solid #10b981;
+      }
+      .toast-error {
+        border-left: 3px solid #ef4444;
+      }
+      .toast-info {
+        border-left: 3px solid #3b82f6;
+      }
+      .toast-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .toast-message {
+        color: var(--text-primary);
       }
     </style>
   </head>
   <body>
+    <div id="toast-container" class="toast-container"></div>
     <div class="shell">
-      <section class="hero">
-        <h1>多地區 EC2 控制台</h1>
-        <p>先列出機器清單，再由你手動刷新各地區狀態與公有 IPv4 DNS。</p>
-      </section>
-      <section class="panel">
-        <div class="actions">
-          <button type="button" class="secondary" id="refresh-all">全部刷新</button>
+      <header class="app-header">
+        <div class="app-brand">
+          <svg class="brand-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a6 6 0 0 0 6-6 6 6 0 0 0-6-6z"></path></svg>
+          <h1>EC2 電源管理器</h1>
+        </div>
+        <div class="header-actions">
+          <button type="button" class="primary" id="refresh-all">
+            <svg class="btn-icon icon-spin-all" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            <span>全部重新整理</span>
+          </button>
           <form class="inline" method="post" action="/logout">
-            <button type="submit" class="secondary">登出</button>
+            <button type="submit" class="secondary">
+              <svg class="btn-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+              <span>登出</span>
+            </button>
           </form>
         </div>
-        <p id="message"></p>
-      </section>
+      </header>
       ${renderRegionSections(placeholderRegions)}
     </div>
     <script>
-      const messageEl = document.getElementById("message");
+      let isRefreshing = false;
+
+      function showToast(message, type = "info") {
+        const container = document.getElementById("toast-container");
+        if (!container) return;
+        
+        const toast = document.createElement("div");
+        toast.className = \`toast toast-\${type}\`;
+        
+        let icon = "";
+        if (type === "success") {
+          icon = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>\`;
+        } else if (type === "error") {
+          icon = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#be123c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>\`;
+        } else {
+          icon = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>\`;
+        }
+        
+        toast.innerHTML = \`
+          <span class="toast-icon">\${icon}</span>
+          <span class="toast-message">\${message}</span>
+        \`;
+        container.appendChild(toast);
+        
+        requestAnimationFrame(() => {
+          toast.classList.add("show");
+        });
+        
+        setTimeout(() => {
+          toast.classList.remove("show");
+          toast.addEventListener("transitionend", () => {
+            toast.remove();
+          });
+        }, 4000);
+      }
+
+      function getStatusBadgeClass(state) {
+        const s = (state || "").toLowerCase().trim();
+        if (s === "running") return "badge-running";
+        if (s === "stopped") return "badge-stopped";
+        if (["pending", "stopping", "shutting-down"].includes(s) || s.includes("中")) return "badge-pending";
+        if (s === "查詢失敗" || s === "未找到") return "badge-failed";
+        return "badge-unknown";
+      }
 
       function updateCard(item) {
         const escapedRegion = CSS.escape(item.region);
@@ -752,8 +1194,30 @@ function renderAppPage() {
         );
         if (!card) return;
         card.querySelector(".machine-name").textContent = item.displayName;
-        card.querySelector(".state").textContent = item.state;
-        card.querySelector(".dns").textContent = item.publicDnsName;
+        
+        const stateEl = card.querySelector(".state");
+        if (stateEl) {
+          stateEl.textContent = item.state;
+          const badgeEl = stateEl.closest(".state-badge");
+          if (badgeEl) {
+            badgeEl.className = "state-badge " + getStatusBadgeClass(item.state);
+          }
+        }
+        
+        const dnsEl = card.querySelector(".dns");
+        if (dnsEl) {
+          dnsEl.textContent = item.publicDnsName;
+        }
+
+        const copyBtn = card.querySelector(".copy-btn");
+        if (copyBtn) {
+          if (item.publicDnsName && item.publicDnsName !== "未刷新" && item.publicDnsName !== "查詢失敗" && item.publicDnsName !== "未找到") {
+            copyBtn.dataset.copy = item.publicDnsName;
+            copyBtn.style.display = "inline-flex";
+          } else {
+            copyBtn.style.display = "none";
+          }
+        }
       }
 
       function applyRefreshPayload(data) {
@@ -764,16 +1228,42 @@ function renderAppPage() {
         }
       }
 
+      function setRefreshingState(active) {
+        isRefreshing = active;
+        
+        document.querySelectorAll("button").forEach(btn => {
+          if (!btn.closest("form")) {
+            btn.disabled = active;
+          }
+        });
+        
+        document.querySelectorAll(".icon-spin-all, .refresh-btn svg, [data-action='refresh-one'] svg").forEach(icon => {
+          if (active) {
+            icon.classList.add("spinning");
+          } else {
+            icon.classList.remove("spinning");
+          }
+        });
+      }
+
       async function refreshAll() {
-        messageEl.textContent = "刷新中...";
-        const response = await fetch("/api/refresh", { method: "POST" });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          messageEl.textContent = data.error || "刷新失敗。";
-          return;
+        if (isRefreshing) return;
+        setRefreshingState(true);
+        
+        try {
+          const response = await fetch("/api/refresh", { method: "POST" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            showToast(data.error || "整理狀態失敗。", "error");
+            return;
+          }
+          applyRefreshPayload(data);
+          showToast("狀態已整理完成", "success");
+        } catch (err) {
+          showToast("網路錯誤，整理狀態失敗。", "error");
+        } finally {
+          setRefreshingState(false);
         }
-        applyRefreshPayload(data);
-        messageEl.textContent = "刷新完成。";
       }
 
       async function runAction(region, instanceId, action) {
@@ -782,20 +1272,34 @@ function renderAppPage() {
             return;
           }
         }
-        messageEl.textContent = "處理中...";
-        const response = await fetch("/api/action", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ region, instanceId, action }),
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          messageEl.textContent = data.error || "操作失敗。";
-          return;
+        
+        const actionText = action === "start" ? "開機" : "關機";
+        showToast(\`正在傳送 \${actionText} 請求...\`, "info");
+        setRefreshingState(true);
+        
+        try {
+          const response = await fetch("/api/action", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ region, instanceId, action }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            showToast(data.error || \`\${actionText}操作失敗。\`, "error");
+            return;
+          }
+          
+          showToast(data.message || \`已成功送出 \${actionText} 請求。\`, "success");
+          
+          // Auto-refresh state after short delay
+          setTimeout(refreshAll, 2000);
+        } catch (err) {
+          showToast("網路錯誤，操作失敗。", "error");
+        } finally {
+          setRefreshingState(false);
         }
-        messageEl.textContent = data.message || "已送出操作。";
       }
 
       document.getElementById("refresh-all").addEventListener("click", refreshAll);
@@ -817,6 +1321,38 @@ function renderAppPage() {
           runAction(region, instanceId, action);
         });
       });
+
+      // Clipboard copy handling
+      document.addEventListener("click", async (e) => {
+        const copyBtn = e.target.closest(".copy-btn");
+        if (!copyBtn) return;
+        
+        const textToCopy = copyBtn.dataset.copy;
+        if (!textToCopy) return;
+        
+        try {
+          await navigator.clipboard.writeText(textToCopy);
+          
+          const copyIcon = copyBtn.querySelector(".copy-icon");
+          const checkIcon = copyBtn.querySelector(".check-icon");
+          
+          if (copyIcon && checkIcon) {
+            copyIcon.style.display = "none";
+            checkIcon.style.display = "inline-block";
+            copyBtn.classList.add("copied");
+            
+            showToast("成功複製到剪貼簿", "success");
+            
+            setTimeout(() => {
+              copyIcon.style.display = "inline-block";
+              checkIcon.style.display = "none";
+              copyBtn.classList.remove("copied");
+            }, 2000);
+          }
+        } catch (err) {
+          showToast("複製失敗", "error");
+        }
+      });
     </script>
   </body>
 </html>`;
@@ -827,7 +1363,7 @@ function htmlResponse(html, init = {}) {
     ...init,
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'self'",
+      "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; form-action 'self'; base-uri 'self'",
       "x-content-type-options": "nosniff",
       "x-frame-options": "DENY",
       "referrer-policy": "no-referrer",
