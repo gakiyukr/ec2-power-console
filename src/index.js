@@ -1215,29 +1215,33 @@ function renderAppPage() {
       function showToast(message, type = "info") {
         const container = document.getElementById("toast-container");
         if (!container) return;
-        
+
         const toast = document.createElement("div");
         toast.className = \`toast toast-\${type}\`;
-        
-        let icon = "";
+
+        const iconSpan = document.createElement("span");
+        iconSpan.className = "toast-icon";
+
         if (type === "success") {
-          icon = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>\`;
+          iconSpan.innerHTML = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>\`;
         } else if (type === "error") {
-          icon = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#be123c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>\`;
+          iconSpan.innerHTML = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#be123c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>\`;
         } else {
-          icon = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>\`;
+          iconSpan.innerHTML = \`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>\`;
         }
-        
-        toast.innerHTML = \`
-          <span class="toast-icon">\${icon}</span>
-          <span class="toast-message">\${message}</span>
-        \`;
+
+        const messageSpan = document.createElement("span");
+        messageSpan.className = "toast-message";
+        messageSpan.textContent = message;
+
+        toast.appendChild(iconSpan);
+        toast.appendChild(messageSpan);
         container.appendChild(toast);
-        
+
         requestAnimationFrame(() => {
           toast.classList.add("show");
         });
-        
+
         setTimeout(() => {
           toast.classList.remove("show");
           toast.addEventListener("transitionend", () => {
