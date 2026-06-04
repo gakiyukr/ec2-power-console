@@ -5,3 +5,12 @@ compatibility_date = "2026-05-27"
 # 敏感配置已移至 .env 或 Cloudflare Secrets
 # 本地開發時會從 .env 讀取
 # 生產環境請使用: wrangler secret put <KEY_NAME>
+
+[secrets]
+required = [
+  "APP_PASSWORD",
+  "SESSION_SECRET",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+]
+
